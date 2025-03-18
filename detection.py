@@ -6,21 +6,23 @@ import serial
 # --- Configuration ---
 MODEL_NAME = "yolov8s.pt"
 CONFIDENCE_THRESHOLD = 0.5
-CAMERA_FOCAL_LENGTH_PIXELS = 1000
+CAMERA_FOCAL_LENGTH_PIXELS = 1000  # Calibrate!
 KNOWN_OBJECT_HEIGHT = 1.75
 MAX_DISTANCE = 10
 MIN_DISTANCE = 0
 SERIAL_PORT = '/dev/tty.usbserial-2130'  # CHANGE THIS!
 BAUD_RATE = 9600
 
-
 # --- DMX Pan Calibration ---
-DMX_LEFT = 70  # DMX value for all the way left
-DMX_RIGHT = 105  # DMX value for all the way right
+DMX_LEFT = 70
+DMX_RIGHT = 105
 
 # --- DMX Tilt Calibration ---
-DMX_TOP = 20      # DMX value for all the way up.
-DMX_BOTTOM = 70     # DMX value for all the way down.
+DMX_TOP = 0
+DMX_BOTTOM = 105
+
+# --- Tracking ---
+tracked_person_id = None  # ID of the currently tracked person (None = no one tracked)
 
 
 def estimate_distance(bbox_height_pixels):
@@ -67,6 +69,8 @@ def read_serial_response(ser):
 
 
 def main():
+    global tracked_person_id  # Use the global variable
+
     model = YOLO(MODEL_NAME)
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -100,29 +104,55 @@ def main():
         print(f"Inference time: {inference_time:.4f} seconds")
 
         annotated_frame = frame.copy()
-        for r in results:
-            boxes = r.boxes
-            for box in boxes:
-                x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0]]
+
+        # --- Tracking Logic ---
+        if tracked_person_id is None:  # No one currently tracked
+            # Find the *first* person detected (within distance range)
+            for r in results:
+                boxes = r.boxes
+                for box_idx, box in enumerate(boxes): #added enumerate for unique id
+                    x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0]]
+                    w = x2 - x1
+                    h = y2 - y1
+                    confidence = float(box.conf[0])
+                    cls = int(box.cls[0])
+                    # class_name = model.names[cls] if model.names else f"Class {cls}" # No longer needed here
+                    distance = estimate_distance(h)
+
+                    if MIN_DISTANCE <= distance <= MAX_DISTANCE:
+                        tracked_person_id = box_idx  # Assign an ID (index) to the first valid detection
+                        break  # Exit inner loop (boxes) after finding the first person
+                if tracked_person_id is not None:
+                    break  # Exit outer loop (results) after finding the first person
+
+        # --- Control DMX based on tracked person (if any) ---
+        if tracked_person_id is not None:
+            tracked_box = None  # Initialize
+
+            # Find the box with the tracked ID
+            for r in results:
+                boxes = r.boxes
+                if tracked_person_id < len(boxes): # Check if valid
+                    tracked_box = boxes[tracked_person_id]
+                    break # Exit loop after box is found
+
+
+            if tracked_box is not None:
+                x1, y1, x2, y2 = [int(coord) for coord in tracked_box.xyxy[0]]
                 w = x2 - x1
                 h = y2 - y1
-                confidence = float(box.conf[0])
-                cls = int(box.cls[0])
+                confidence = float(tracked_box.conf[0])
+                cls = int(tracked_box.cls[0])
                 class_name = model.names[cls] if model.names else f"Class {cls}"
 
                 distance = estimate_distance(h)
 
+                # Check distance again (person might have moved out of range)
                 if MIN_DISTANCE <= distance <= MAX_DISTANCE:
                     person_x = x1 + w // 2
                     person_y = y1 + h // 2
-
-                    # --- Map Pixel Position to DMX Pan Value (Linear Interpolation) ---
                     pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (person_x / frame_width))
-
-                    # --- Map Pixel Position to DMX Tilt Value (Linear Interpolation) ---
                     tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (person_y / frame_height))
-
-
                     send_dmx(ser, pan_value, tilt_value)
 
                     label = f"{class_name}: {confidence:.2f}"
@@ -130,6 +160,11 @@ def main():
                         label += f" Dist: {distance:.2f}m"
                     cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.putText(annotated_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                else:
+                    # Person moved out of range, stop tracking
+                    tracked_person_id = None
+            else: #if tracked_box is none, there are no boxes.
+                tracked_person_id = None
 
         fps = 1 / inference_time if inference_time > 0 else 0
         cv2.putText(annotated_frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
