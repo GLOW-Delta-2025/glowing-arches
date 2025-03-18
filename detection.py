@@ -13,6 +13,7 @@ MIN_DISTANCE = 0
 SERIAL_PORT = '/dev/tty.usbserial-2130'  # CHANGE THIS!
 BAUD_RATE = 9600
 
+
 # --- DMX Pan Calibration ---
 DMX_LEFT = 70  # DMX value for all the way left
 DMX_RIGHT = 105  # DMX value for all the way right
