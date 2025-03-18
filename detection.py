@@ -1,7 +1,7 @@
 import cv2
 from ultralytics import YOLO
 import time
-import serial  # Import the serial library
+import serial
 
 # --- Configuration ---
 MODEL_NAME = "yolov8s.pt"
