@@ -22,7 +22,7 @@ void setup() {
     
     // Initialize fixture settings for each spotlight
     DmxMaster.write(base, 0);         // Pan: 0 degrees
-    DmxMaster.write(base + 1, 0);     // Tilt: 0 degrees
+    DmxMaster.write(base + 2, 0);     // Tilt: 0 degrees
     DmxMaster.write(base + 3, 0);     // Red intensity
     DmxMaster.write(base + 4, 255);   // Green intensity
     DmxMaster.write(base + 5, 0);     // Blue intensity
@@ -51,9 +51,8 @@ void loop() {
       for (int i = 0; i < numSpotlights; i++) {
         int base = spotlights[i];
         DmxMaster.write(base, panValue);
-        DmxMaster.write(base + 1, tiltValue);
+        DmxMaster.write(base + 2, tiltValue);
         DmxMaster.write(base + 3, 255);
-        delay(20);
       }
     }
   }
