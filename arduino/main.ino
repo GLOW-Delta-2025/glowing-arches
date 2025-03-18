@@ -6,9 +6,11 @@ https://www.steinigke.de/download/51785964-Anleitung-96748-1.10-eurolite-led-tmh
 */
 
 const int spotlights[] = {125, 137}; // Starting DMX channels for each spotlight
-const int numSpotlights = sizeof(spotlights) / sizeof(spotlights[0]); // Calculate N of spotlights
+const int numSpotlights = 1; // sizeof(spotlights) / sizeof(spotlights[0]); // Calculate N of spotlights
 
 void setup() {
+  Serial.begin(9600); 
+
   // Initialize DMX communication 
   DmxMaster.usePin(3);
 
@@ -20,9 +22,9 @@ void setup() {
     
     // Initialize fixture settings for each spotlight
     DmxMaster.write(base, 0);         // Pan: 0 degrees
-    DmxMaster.write(base + 1, 0);     // Tilt: 0 degrees
+    DmxMaster.write(base + 2, 0);     // Tilt: 0 degrees
     DmxMaster.write(base + 3, 0);     // Red intensity
-    DmxMaster.write(base + 4, 0);     // Green intensity
+    DmxMaster.write(base + 4, 255);   // Green intensity
     DmxMaster.write(base + 5, 0);     // Blue intensity
     DmxMaster.write(base + 7, 255);   // Dimmer (full brightness)
     DmxMaster.write(base + 8, 0);     // Strobe: off
@@ -33,12 +35,25 @@ void setup() {
 }
 
 void loop() {
-  for (int colorValue = 0; colorValue <= 255; colorValue++) {
-    DmxMaster.write(spotlights[1] + 3, colorValue); // Increase red
-    DmxMaster.write(spotlights[1] + 4, 255 - colorValue); // Decrease green
+  if (Serial.available() > 0) {
+    String data = Serial.readStringUntil('\n'); 
+    int commaIndex = data.indexOf(',');
+    
+    if (commaIndex > 0) {
+      int panValue = data.substring(0, commaIndex).toInt();
+      int tiltValue = data.substring(commaIndex + 1).toInt();
 
-    DmxMaster.write(spotlights[0] + 3, colorValue); // Increase red
-    DmxMaster.write(spotlights[0] + 4, 255 - colorValue); // Decrease green
-    delay(10);
+      Serial.print(": Pan = ");
+      Serial.print(panValue);
+      Serial.print(", Tilt = ");
+      Serial.println(tiltValue);
+
+      for (int i = 0; i < numSpotlights; i++) {
+        int base = spotlights[i];
+        DmxMaster.write(base, panValue);
+        DmxMaster.write(base + 2, tiltValue);
+        DmxMaster.write(base + 3, 255);
+      }
+    }
   }
 }
