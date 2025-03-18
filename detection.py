@@ -6,12 +6,21 @@ import serial
 # --- Configuration ---
 MODEL_NAME = "yolov8s.pt"
 CONFIDENCE_THRESHOLD = 0.5
-CAMERA_FOCAL_LENGTH_PIXELS = 1000  # Calibrate!
+CAMERA_FOCAL_LENGTH_PIXELS = 1000
 KNOWN_OBJECT_HEIGHT = 1.75
 MAX_DISTANCE = 10
 MIN_DISTANCE = 0
-SERIAL_PORT = 'COM3'  #  <--- CHANGE THIS to your serial port
-BAUD_RATE = 9600      #  <--- Make sure this matches your DMX device
+SERIAL_PORT = '/dev/tty.usbserial-2130'  # CHANGE THIS!
+BAUD_RATE = 9600
+
+# --- DMX Pan Calibration ---
+DMX_LEFT = 70  # DMX value for all the way left
+DMX_RIGHT = 105  # DMX value for all the way right
+
+# --- DMX Tilt Calibration ---
+DMX_TOP = 20      # DMX value for all the way up.
+DMX_BOTTOM = 70     # DMX value for all the way down.
+
 
 def estimate_distance(bbox_height_pixels):
     """Estimates distance based on bounding box height."""
@@ -21,17 +30,39 @@ def estimate_distance(bbox_height_pixels):
     return distance
 
 def send_dmx(ser, pan, tilt):
-    """Sends DMX pan and tilt values to the serial port."""
+    """Sends DMX pan and tilt values and reads the response."""
     try:
-        # Ensure values are within 0-255 range
         pan = max(0, min(255, int(pan)))
         tilt = max(0, min(255, int(tilt)))
         ser.write(f"{pan},{tilt}\n".encode())
-        print(f"Sent DMX: Pan={pan}, Tilt={tilt}") #log
+        print(f"Sent DMX: Pan={pan}, Tilt={tilt}")
+
+        response = read_serial_response(ser)
+        if response:
+            print(f"Arduino: {response}")
+
     except serial.SerialException as e:
         print(f"Serial communication error: {e}")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
+
+def read_serial_response(ser):
+    """Reads a line from the serial port, handling timeouts and decoding."""
+    try:
+        if ser.in_waiting > 0:
+            response = ser.readline().decode('utf-8', errors='ignore').strip()
+            return response
+        else:
+             return None
+    except serial.SerialTimeoutException:
+        print("Serial read timeout.")
+        return None
+    except serial.SerialException as e:
+        print(f"Serial error during read: {e}")
+        return None
+    except UnicodeDecodeError as e:
+        print(f"Unicode decode error: {e}")
+        return None
 
 
 def main():
@@ -45,18 +76,13 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
     cap.set(cv2.CAP_PROP_FPS, 30)
 
-     # --- Serial Connection Setup ---
     try:
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        time.sleep(2)  # Wait for connection to establish
+        time.sleep(2)
         print(f"Serial connection established on {SERIAL_PORT}")
     except serial.SerialException as e:
         print(f"Failed to open serial port {SERIAL_PORT}: {e}")
-        return  # Exit if serial connection fails
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
         return
-
 
     while True:
         ret, frame = cap.read()
@@ -64,7 +90,7 @@ def main():
             print("Can't receive frame (stream end?). Exiting ...")
             break
 
-        frame_height, frame_width, _ = frame.shape #get heigt and width
+        frame_height, frame_width, _ = frame.shape
 
         start_time = time.time()
         results = model(frame, stream=False, conf=CONFIDENCE_THRESHOLD, classes=0)
@@ -86,15 +112,16 @@ def main():
                 distance = estimate_distance(h)
 
                 if MIN_DISTANCE <= distance <= MAX_DISTANCE:
-                    # --- Calculate center of the bounding box ---
                     person_x = x1 + w // 2
                     person_y = y1 + h // 2
 
-                    # --- Normalize to DMX range (0-255) ---
-                    pan_value = int((person_x / frame_width) * 255)
-                    tilt_value = int((person_y / frame_height) * 255)
+                    # --- Map Pixel Position to DMX Pan Value (Linear Interpolation) ---
+                    pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (person_x / frame_width))
 
-                    # --- Send DMX values ---
+                    # --- Map Pixel Position to DMX Tilt Value (Linear Interpolation) ---
+                    tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (person_y / frame_height))
+
+
                     send_dmx(ser, pan_value, tilt_value)
 
                     label = f"{class_name}: {confidence:.2f}"
@@ -114,9 +141,8 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
     if ser:
-        ser.close() #close serial connection
+        ser.close()
         print("Serial connection closed.")
-
 
 if __name__ == "__main__":
     main()
