@@ -76,14 +76,20 @@ def match_objects(detected_boxes, frame_centroids):
 
 
 def send_dmx(ser, pan1, tilt1, pan2, tilt2):
-    """Sends DMX pan and tilt values for two lights via serial."""
+    """Sends DMX pan and tilt values for two lights via serial in the format `0:pan,tilt;1:pan,tilt`."""
     try:
+        # Clamp the values to be within the range of 0-255
         pan1 = max(0, min(255, int(pan1)))
         tilt1 = max(0, min(255, int(tilt1)))
         pan2 = max(0, min(255, int(pan2)))
         tilt2 = max(0, min(255, int(tilt2)))
-        ser.write(f"{pan1},{tilt1},{pan2},{tilt2}\n".encode())
-        print(f"Sent DMX: Light1: Pan={pan1}, Tilt={tilt1} | Light2: Pan={pan2}, Tilt={tilt2}")
+
+        # Format the string as `0:pan1,tilt1;1:pan2,tilt2`
+        dmx_data = f"0:{pan1},{tilt1};1:{pan2},{tilt2}"
+
+        # Send the formatted data
+        ser.write(f"{dmx_data}\n".encode())
+        print(f"Sent DMX: {dmx_data}")
     except serial.SerialException as e:
         print(f"Serial communication error: {e}")
     except Exception as e:
