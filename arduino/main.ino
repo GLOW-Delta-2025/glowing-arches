@@ -1,12 +1,7 @@
 #include <DmxMaster.h>
 
-/*
-DMX manual
-https://www.steinigke.de/download/51785964-Anleitung-96748-1.10-eurolite-led-tmh-9-moving-head-wash-de_en.pdf
-*/
-
 const int spotlights[] = {125, 137}; // Starting DMX channels for each spotlight
-const int numSpotlights = 1; // sizeof(spotlights) / sizeof(spotlights[0]); // Calculate N of spotlights
+const int numSpotlights = sizeof(spotlights) / sizeof(spotlights[0]);
 
 void setup() {
   Serial.begin(9600); 
@@ -21,39 +16,50 @@ void setup() {
     int base = spotlights[i];
     
     // Initialize fixture settings for each spotlight
-    DmxMaster.write(base, 0);         // Pan: 0 degrees
-    DmxMaster.write(base + 2, 0);     // Tilt: 0 degrees
-    DmxMaster.write(base + 3, 0);     // Red intensity
-    DmxMaster.write(base + 4, 255);   // Green intensity
-    DmxMaster.write(base + 5, 0);     // Blue intensity
-    DmxMaster.write(base + 7, 255);   // Dimmer (full brightness)
-    DmxMaster.write(base + 8, 0);     // Strobe: off
-    DmxMaster.write(base + 9, 0);     // Color macro: off
-    DmxMaster.write(base + 10, 0);    // Special functions: none
-    DmxMaster.write(base + 11, 0);    // Reserved
+    DmxMaster.write(base, 0);         // Pan motor movement
+    DmxMaster.write(base + 1, 255);   // Pan motor fine
+    DmxMaster.write(base + 2, 0);     // Tilt motor movement
+    // Tilt motor fine
+    DmxMaster.write(base + 4, 10); // All dimming adjustments from dark to bright
+    DmxMaster.write(base + 5, 255); // Red color adjustment from dark to bright
+    DmxMaster.write(base + 6, 255); // Green color adjustment from dark to bright
+    DmxMaster.write(base + 7, 255); // Blue color adjustment from dark to bright
+    // DmxMaster.write(base + 8, 255); // White color adjustment from dark to bright
+    // Adjust mixed color
+    // Adjust strobe from slow to fast
+    // Close/open sound (0-127 = close and 128-255 = open)
   }
 }
 
 void loop() {
   if (Serial.available() > 0) {
-    String data = Serial.readStringUntil('\n'); 
-    int commaIndex = data.indexOf(',');
-    
-    if (commaIndex > 0) {
-      int panValue = data.substring(0, commaIndex).toInt();
-      int tiltValue = data.substring(commaIndex + 1).toInt();
+    String data = Serial.readStringUntil('\n');  
+    processSerialData(data);
+  }
+}
 
-      Serial.print(": Pan = ");
-      Serial.print(panValue);
-      Serial.print(", Tilt = ");
-      Serial.println(tiltValue);
+void processSerialData(String data) {
+  int start = 0;
+  while (start < data.length()) {
+    int sepIndex = data.indexOf(';', start);
+    if (sepIndex == -1) sepIndex = data.length(); // Last segment
 
-      for (int i = 0; i < numSpotlights; i++) {
-        int base = spotlights[i];
+    String segment = data.substring(start, sepIndex);
+    int colonIndex = segment.indexOf(':');
+    int commaIndex = segment.indexOf(',');
+
+    if (colonIndex > 0 && commaIndex > colonIndex) {
+      int id = segment.substring(0, colonIndex).toInt();
+      int panValue = segment.substring(colonIndex + 1, commaIndex).toInt();
+      int tiltValue = segment.substring(commaIndex + 1).toInt();
+
+      if (id >= 0 && id < numSpotlights) {
+        int base = spotlights[id];
         DmxMaster.write(base, panValue);
         DmxMaster.write(base + 2, tiltValue);
         DmxMaster.write(base + 3, 255);
       }
     }
+    start = sepIndex + 1; // Move to next segment
   }
 }
