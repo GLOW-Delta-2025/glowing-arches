@@ -23,7 +23,7 @@ DMX_BOTTOM = 105
 # --- Tracking States ---
 tracked_objects = OrderedDict()  # Active object trackers
 next_object_id = 0  # Next ID to assign
-tracked_person_id = None  # Person ID to control DMX (focus tracking)
+tracked_person_ids = [None, None]  # IDs for the two tracked people
 lost_objects = {}  # Tracks lost object IDs and how long they've been missing
 
 
@@ -46,7 +46,6 @@ def match_objects(detected_boxes, frame_centroids):
     Uses simple centroid matching with minimum Euclidean distance.
     """
     global tracked_objects, next_object_id
-
     updated_objects = OrderedDict()  # Store updated object positions
     new_detected_ids = set()  # New detections
 
@@ -76,13 +75,15 @@ def match_objects(detected_boxes, frame_centroids):
     tracked_objects = updated_objects
 
 
-def send_dmx(ser, pan, tilt):
-    """Sends DMX pan and tilt values via serial."""
+def send_dmx(ser, pan1, tilt1, pan2, tilt2):
+    """Sends DMX pan and tilt values for two lights via serial."""
     try:
-        pan = max(0, min(255, int(pan)))
-        tilt = max(0, min(255, int(tilt)))
-        ser.write(f"{pan},{tilt}\n".encode())
-        print(f"Sent DMX: Pan={pan}, Tilt={tilt}")
+        pan1 = max(0, min(255, int(pan1)))
+        tilt1 = max(0, min(255, int(tilt1)))
+        pan2 = max(0, min(255, int(pan2)))
+        tilt2 = max(0, min(255, int(tilt2)))
+        ser.write(f"{pan1},{tilt1},{pan2},{tilt2}\n".encode())
+        print(f"Sent DMX: Light1: Pan={pan1}, Tilt={tilt1} | Light2: Pan={pan2}, Tilt={tilt2}")
     except serial.SerialException as e:
         print(f"Serial communication error: {e}")
     except Exception as e:
@@ -90,8 +91,7 @@ def send_dmx(ser, pan, tilt):
 
 
 def main():
-    global tracked_person_id  # Allow modifying tracked person globally
-
+    global tracked_person_ids  # Allow modifying tracked person globally
     model = YOLO(MODEL_NAME)
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -137,45 +137,35 @@ def main():
         # Update tracking
         match_objects(detected_boxes, centroids)
 
-        # Annotate detected people and tracked IDs
-        for obj_id, centroid in tracked_objects.items():
-            if obj_id in tracked_objects:
-                # Get corresponding bounding box for the ID
-                index = list(tracked_objects.keys()).index(obj_id)
-                box = detected_boxes[index]
+        # Assign tracked persons if none are set
+        if None in tracked_person_ids and tracked_objects:
+            # Fill any None slots in tracked_person_ids with active tracked IDs
+            for obj_id in tracked_objects.keys():
+                if obj_id not in tracked_person_ids:
+                    tracked_person_ids[tracked_person_ids.index(None)] = obj_id
+                if None not in tracked_person_ids:
+                    break
 
-                # Unpack bounding box coordinates
-                x1, y1, x2, y2 = box
+        # Prepare pan/tilt values for the two DMX lights
+        pan_tilt_values = []
+        for tracked_person_id in tracked_person_ids:
+            if tracked_person_id in tracked_objects:
+                tracked_centroid = tracked_objects[tracked_person_id]
+                person_x, person_y = tracked_centroid
 
-                # Green Box for Tracked Person
-                if obj_id == tracked_person_id:
-                    color = (0, 255, 0)  # Green
-                    label_text = f"Tracked: ID {obj_id}"
-                else:
-                    color = (255, 0, 0)  # Blue for other IDs
-                    label_text = f"ID: {obj_id}"
+                # Convert object centroid position to DMX pan/tilt values
+                pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (person_x / frame_width))
+                tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (person_y / frame_height))
+                pan_tilt_values.extend([pan_value, tilt_value])
+            else:
+                pan_tilt_values.extend([0, 0])  # Default values if the tracked ID is lost
 
-                # Draw bounding boxes and text
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame, label_text, (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        # If less than two people are tracked, fill remaining slots
+        while len(pan_tilt_values) < 4:
+            pan_tilt_values.extend([0, 0])
 
-        # Assign tracked person if none is set
-        if tracked_person_id is None and tracked_objects:
-            tracked_person_id = list(tracked_objects.keys())[0]  # Lock onto the first detected person
-
-        # Send DMX commands for tracked person
-        if tracked_person_id in tracked_objects:
-            tracked_centroid = tracked_objects[tracked_person_id]
-            person_x, person_y = tracked_centroid
-
-            # Convert object centroid position to DMX pan/tilt values
-            pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (person_x / frame_width))
-            tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (person_y / frame_height))
-
-            send_dmx(ser, pan_value, tilt_value)
-        else:
-            tracked_person_id = None  # Reset tracking if tracked person is lost
+        # Send DMX commands
+        send_dmx(ser, *pan_tilt_values)
 
         # Display video stream
         cv2.imshow("YOLOv8 Multi-Object Tracker", frame)
