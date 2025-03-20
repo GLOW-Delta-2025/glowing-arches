@@ -40,7 +40,31 @@ def estimate_distance(bbox_height_pixels):
     distance = (KNOWN_OBJECT_HEIGHT * CAMERA_FOCAL_LENGTH_PIXELS) / bbox_height_pixels
     return distance
 
-p
+
+def send_dmx(ser, pan1, tilt1, pan2=0, tilt2=0):
+    """Sends DMX pan and tilt values for two individuals and reads the response."""
+    try:
+        # Clamp pan and tilt values for both individuals between 0 and 255
+        pan1 = max(0, min(255, int(pan1)))
+        tilt1 = max(0, min(255, int(tilt1)))
+        pan2 = max(0, min(255, int(pan2)))
+        tilt2 = max(0, min(255, int(tilt2)))
+
+        # Format the message as '0:pan,tilt;1:pan,tilt'
+        message = f"0:{pan1},{tilt1};1:{pan2},{tilt2}\n"
+
+        # Send the DMX message over serial
+        ser.write(message.encode())
+        print(f"Sent DMX: {message.strip()}")
+
+        # Read and print Arduino's response
+        response = read_serial_response(ser)
+        if response:
+            print(f"Arduino: {response}")
+    except serial.SerialException as e:
+        print(f"Serial communication error: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 def read_serial_response(ser):
     """Reads a line from the serial port, handling timeouts and decoding."""
