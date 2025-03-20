@@ -2,203 +2,168 @@ import cv2
 from ultralytics import YOLO
 import time
 import serial
-from collections import OrderedDict
-import numpy as np
 
 # --- Configuration ---
 MODEL_NAME = "yolov8s.pt"
 CONFIDENCE_THRESHOLD = 0.5
-CAMERA_FOCAL_LENGTH_PIXELS = 1000  # Set appropriately for your camera
-KNOWN_OBJECT_HEIGHT = 1.75  # Average height of a person (meters)
-MAX_DISTANCE = 10  # Maximum allowable distance (meters)
-MIN_DISTANCE = 0  # Minimum allowable distance (meters)
+CAMERA_FOCAL_LENGTH_PIXELS = 1000  # Calibrate!
+KNOWN_OBJECT_HEIGHT = 1.75
+MAX_DISTANCE = 10
+MIN_DISTANCE = 0
 SERIAL_PORT = '/dev/tty.usbserial-2110'  # CHANGE THIS!
 BAUD_RATE = 9600
 
-# --- DMX Calibration ---
-DMX_LEFT = 70
-DMX_RIGHT = 105
-DMX_TOP = 0
-DMX_BOTTOM = 105
+# --- DMX 1 Calibration ---
+# --- PAN ---
+DMX_1_LEFT = 70
+DMX_1_RIGHT = 105
+# --- TILT ---
+DMX_1_TOP = 0
+DMX_1_BOTTOM = 105
 
-# --- Tracking States ---
-tracked_objects = OrderedDict()  # Active object trackers
-next_object_id = 0  # Next ID to assign
-tracked_person_id_1 = None  # Person ID #1 to control DMX
-tracked_person_id_2 = None  # Person ID #2 to control DMX
-lost_objects = {}  # Tracks lost object IDs and how long they've been missing
+# --- DMX 2 Calibration ---
+# --- PAN ---
+DMX_2_LEFT = 70
+DMX_2_RIGHT = 105
+# --- TILT ---
+DMX_2_TOP = 0
+DMX_2_BOTTOM = 105
+
+# --- Tracking ---
+tracked_person_id = None  # ID of the currently tracked person (None = no one tracked)
 
 
 def estimate_distance(bbox_height_pixels):
     """Estimates distance based on bounding box height."""
     if bbox_height_pixels <= 0:
         return -1
-    return (KNOWN_OBJECT_HEIGHT * CAMERA_FOCAL_LENGTH_PIXELS) / bbox_height_pixels
+    distance = (KNOWN_OBJECT_HEIGHT * CAMERA_FOCAL_LENGTH_PIXELS) / bbox_height_pixels
+    return distance
 
+p
 
-def calculate_centroid(x1, y1, x2, y2):
-    """Calculates the centroid of a bounding box."""
-    return int((x1 + x2) / 2), int((y1 + y2) / 2)
-
-
-def match_objects(detected_boxes, centroids):
-    """
-    Match currently tracked objects with newly detected objects (boxes).
-    Uses simple centroid matching with minimum Euclidean distance.
-    """
-    global tracked_objects, next_object_id
-
-    updated_objects = OrderedDict()
-    used_centroids = set()
-
-    # Match detected centroids to tracked objects by proximity
-    for obj_id, tracked_centroid in tracked_objects.items():
-        min_distance = float('inf')
-        matched_index = None
-
-        for i, centroid in enumerate(centroids):
-            if i in used_centroids:
-                continue
-
-            distance = np.linalg.norm(np.array(tracked_centroid) - np.array(centroid))
-            if distance < min_distance:
-                min_distance = distance
-                matched_index = i
-
-        if matched_index is not None and min_distance < 50:  # Matching threshold
-            updated_objects[obj_id] = centroids[matched_index]
-            used_centroids.add(matched_index)
-        else:
-            lost_objects[obj_id] = True
-
-    # Assign new IDs to unmatched detections
-    for i, centroid in enumerate(centroids):
-        if i not in used_centroids:
-            updated_objects[next_object_id] = centroid
-            next_object_id += 1
-
-    tracked_objects = updated_objects
-
-
-def send_dmx_combined(ser, dmx_message):
-    """Sends consolidated DMX message via serial."""
+def read_serial_response(ser):
+    """Reads a line from the serial port, handling timeouts and decoding."""
     try:
-        ser.write(f"{dmx_message}\n".encode())
-        print(f"Sent DMX Message: {dmx_message}")
+        if ser.in_waiting > 0:
+            response = ser.readline().decode('utf-8', errors='ignore').strip()
+            return response
+        else:
+             return None
+    except serial.SerialTimeoutException:
+        print("Serial read timeout.")
+        return None
     except serial.SerialException as e:
-        print(f"Serial communication error: {e}")
-    except Exception as e:
-        print(f"Unexpected error occurred while sending DMX: {e}")
-
-
-def convert_to_dmx(value, value_min, value_max, dmx_min, dmx_max):
-    """Converts values (like coordinates) to DMX range."""
-    value = max(value_min, min(value, value_max))  # Clamp to value range
-    return int(dmx_min + (dmx_max - dmx_min) * ((value - value_min) / (value_max - value_min)))
+        print(f"Serial error during read: {e}")
+        return None
+    except UnicodeDecodeError as e:
+        print(f"Unicode decode error: {e}")
+        return None
 
 
 def main():
-    global tracked_person_id_1, tracked_person_id_2  # Allow modifying tracked persons globally
+    global tracked_person_id  # Use the global variable
 
     model = YOLO(MODEL_NAME)
     cap = cv2.VideoCapture(0)
-
     if not cap.isOpened():
-        print("Camera not accessible")
+        print("Cannot open camera")
         return
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    cap.set(cv2.CAP_PROP_FPS, 30)
 
     try:
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        time.sleep(2)  # Let the serial connection stabilize
+        time.sleep(2)
         print(f"Serial connection established on {SERIAL_PORT}")
     except serial.SerialException as e:
         print(f"Failed to open serial port {SERIAL_PORT}: {e}")
-        ser = None
+        return
 
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("Can't fetch frame (stream ended?). Exiting...")
+            print("Can't receive frame (stream end?). Exiting ...")
             break
 
         frame_height, frame_width, _ = frame.shape
+
+        start_time = time.time()
         results = model(frame, stream=False, conf=CONFIDENCE_THRESHOLD, classes=0)
+        end_time = time.time()
+        inference_time = end_time - start_time
+        print(f"Inference time: {inference_time:.4f} seconds")
 
-        detected_boxes = []
-        centroids = []
+        annotated_frame = frame.copy()
 
-        # Process detected bounding boxes
-        for r in results:
-            boxes = r.boxes
-            for box in boxes:
-                x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0]]
+        # --- Tracking Logic ---
+        if tracked_person_id is None:  # No one currently tracked
+            # Find the *first* person detected (within distance range)
+            for r in results:
+                boxes = r.boxes
+                for box_idx, box in enumerate(boxes): #added enumerate for unique id
+                    x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0]]
+                    w = x2 - x1
+                    h = y2 - y1
+                    confidence = float(box.conf[0])
+                    cls = int(box.cls[0])
+                    # class_name = model.names[cls] if model.names else f"Class {cls}" # No longer needed here
+                    distance = estimate_distance(h)
+
+                    if MIN_DISTANCE <= distance <= MAX_DISTANCE:
+                        tracked_person_id = box_idx  # Assign an ID (index) to the first valid detection
+                        break  # Exit inner loop (boxes) after finding the first person
+                if tracked_person_id is not None:
+                    break  # Exit outer loop (results) after finding the first person
+
+        # --- Control DMX based on tracked person (if any) ---
+        if tracked_person_id is not None:
+            tracked_box = None  # Initialize
+
+            # Find the box with the tracked ID
+            for r in results:
+                boxes = r.boxes
+                if tracked_person_id < len(boxes): # Check if valid
+                    tracked_box = boxes[tracked_person_id]
+                    break # Exit loop after box is found
+
+
+            if tracked_box is not None:
+                x1, y1, x2, y2 = [int(coord) for coord in tracked_box.xyxy[0]]
                 w = x2 - x1
                 h = y2 - y1
-                bbox_confidence = float(box.conf[0])
+                confidence = float(tracked_box.conf[0])
+                cls = int(tracked_box.cls[0])
+                class_name = model.names[cls] if model.names else f"Class {cls}"
 
-                # Estimate distance and filter by range
                 distance = estimate_distance(h)
+
+                # Check distance again (person might have moved out of range)
                 if MIN_DISTANCE <= distance <= MAX_DISTANCE:
-                    detected_boxes.append((x1, y1, x2, y2))
-                    centroids.append(calculate_centroid(x1, y1, x2, y2))
+                    person_x = x1 + w // 2
+                    person_y = y1 + h // 2
+                    pan_value = int(DMX_1_RIGHT + (DMX_1_LEFT - DMX_1_RIGHT) * (person_x / frame_width))
+                    tilt_value = int(DMX_1_BOTTOM + (DMX_1_TOP - DMX_1_BOTTOM) * (person_y / frame_height))
+                    send_dmx(ser, pan_value, tilt_value)
 
-        # Update object tracking
-        match_objects(detected_boxes, centroids)
+                    label = f"{class_name}: {confidence:.2f}"
+                    if distance != -1:
+                        label += f" Dist: {distance:.2f}m"
+                    cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.putText(annotated_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                else:
+                    # Person moved out of range, stop tracking
+                    tracked_person_id = None
+            else: #if tracked_box is none, there are no boxes.
+                tracked_person_id = None
 
-        # Assign DMX channels based on tracked IDs
-        tracked_ids = list(tracked_objects.keys())
-        if len(tracked_ids) > 0:
-            tracked_person_id_1 = tracked_ids[0]
-        if len(tracked_ids) > 1:
-            tracked_person_id_2 = tracked_ids[1]
+        fps = 1 / inference_time if inference_time > 0 else 0
+        cv2.putText(annotated_frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-        dmx_message = ""  # Consolidated DMX message
+        cv2.imshow("YOLOv8 Object Detection", annotated_frame)
 
-        # Handle DMX movement for Person #1
-        if tracked_person_id_1 in tracked_objects:
-            person_x_1, person_y_1 = tracked_objects[tracked_person_id_1]
-            pan_value_1 = convert_to_dmx(person_x_1, 0, frame_width, DMX_LEFT, DMX_RIGHT)
-            tilt_value_1 = convert_to_dmx(person_y_1, 0, frame_height, DMX_TOP, DMX_BOTTOM)
-            dmx_message += f"0:{pan_value_1},{tilt_value_1};"
-
-        # Handle DMX movement for Person #2
-        if tracked_person_id_2 in tracked_objects:
-            person_x_2, person_y_2 = tracked_objects[tracked_person_id_2]
-            pan_value_2 = convert_to_dmx(person_x_2, 0, frame_width, DMX_LEFT, DMX_RIGHT)
-            tilt_value_2 = convert_to_dmx(person_y_2, 0, frame_height, DMX_TOP, DMX_BOTTOM)
-            dmx_message += f"1:{pan_value_2},{tilt_value_2};"
-        else:
-            # Default DMX signal for Person #2 when not detected but Person #1 is
-            if tracked_person_id_1 in tracked_objects:
-                dmx_message += "1:0,0;"
-
-        # Send DMX message to serial port
-        if ser and dmx_message:
-            send_dmx_combined(ser, dmx_message.strip(";"))  # Remove trailing semicolon
-
-        # Annotate the frame
-        for obj_id, centroid in tracked_objects.items():
-            index = tracked_ids.index(obj_id)
-            box = detected_boxes[index]
-            x1, y1, x2, y2 = box
-
-            if obj_id == tracked_person_id_1:
-                color = (0, 255, 0)  # Green for Person #1
-                label_text = f"Person #1: ID {obj_id}"
-            elif obj_id == tracked_person_id_2:
-                color = (0, 0, 255)  # Red for Person #2
-                label_text = f"Person #2: ID {obj_id}"
-            else:
-                color = (255, 0, 0)  # Blue for others
-                label_text = f"ID: {obj_id}"
-
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, label_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-        # Display the frame
-        cv2.imshow("YOLOv8 Multi-Person Tracker", frame)
-
-        # Break on 'q' key press
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -207,7 +172,6 @@ def main():
     if ser:
         ser.close()
         print("Serial connection closed.")
-
 
 if __name__ == "__main__":
     main()
