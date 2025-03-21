@@ -5,3 +5,4 @@ torch==2.6.0
 torchvision==0.21.0
 ultralytics==8.3.93
 ultralytics-thop==2.0.14
+pynput==1.8.1
