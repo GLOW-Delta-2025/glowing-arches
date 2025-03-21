@@ -10,24 +10,16 @@ CAMERA_FOCAL_LENGTH_PIXELS = 1000  # Calibrate!
 KNOWN_OBJECT_HEIGHT = 1.75
 MAX_DISTANCE = 10
 MIN_DISTANCE = 0
-SERIAL_PORT = '/dev/tty.usbserial-2110'  # CHANGE THIS!
+SERIAL_PORT = '/dev/tty.usbserial-2130'  # CHANGE THIS!
 BAUD_RATE = 9600
 
-# --- DMX 1 Calibration ---
-# --- PAN ---
-DMX_1_LEFT = 70
-DMX_1_RIGHT = 105
-# --- TILT ---
-DMX_1_TOP = 0
-DMX_1_BOTTOM = 105
+# --- DMX Pan Calibration ---
+DMX_LEFT = 70
+DMX_RIGHT = 105
 
-# --- DMX 2 Calibration ---
-# --- PAN ---
-DMX_2_LEFT = 70
-DMX_2_RIGHT = 105
-# --- TILT ---
-DMX_2_TOP = 0
-DMX_2_BOTTOM = 105
+# --- DMX Tilt Calibration ---
+DMX_TOP = 0
+DMX_BOTTOM = 105
 
 # --- Tracking ---
 tracked_person_id = None  # ID of the currently tracked person (None = no one tracked)
@@ -40,27 +32,18 @@ def estimate_distance(bbox_height_pixels):
     distance = (KNOWN_OBJECT_HEIGHT * CAMERA_FOCAL_LENGTH_PIXELS) / bbox_height_pixels
     return distance
 
-
-def send_dmx(ser, pan1, tilt1, pan2=0, tilt2=0):
-    """Sends DMX pan and tilt values for two individuals and reads the response."""
+def send_dmx(ser, pan, tilt):
+    """Sends DMX pan and tilt values and reads the response."""
     try:
-        # Clamp pan and tilt values for both individuals between 0 and 255
-        pan1 = max(0, min(255, int(pan1)))
-        tilt1 = max(0, min(255, int(tilt1)))
-        pan2 = max(0, min(255, int(pan2)))
-        tilt2 = max(0, min(255, int(tilt2)))
+        pan = max(0, min(255, int(pan)))
+        tilt = max(0, min(255, int(tilt)))
+        ser.write(f"{pan},{tilt}\n".encode())
+        print(f"Sent DMX: Pan={pan}, Tilt={tilt}")
 
-        # Format the message as '0:pan,tilt;1:pan,tilt'
-        message = f"0:{pan1},{tilt1};1:{pan2},{tilt2}\n"
-
-        # Send the DMX message over serial
-        ser.write(message.encode())
-        print(f"Sent DMX: {message.strip()}")
-
-        # Read and print Arduino's response
         response = read_serial_response(ser)
         if response:
             print(f"Arduino: {response}")
+
     except serial.SerialException as e:
         print(f"Serial communication error: {e}")
     except Exception as e:
@@ -168,8 +151,8 @@ def main():
                 if MIN_DISTANCE <= distance <= MAX_DISTANCE:
                     person_x = x1 + w // 2
                     person_y = y1 + h // 2
-                    pan_value = int(DMX_1_RIGHT + (DMX_1_LEFT - DMX_1_RIGHT) * (person_x / frame_width))
-                    tilt_value = int(DMX_1_BOTTOM + (DMX_1_TOP - DMX_1_BOTTOM) * (person_y / frame_height))
+                    pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (person_x / frame_width))
+                    tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (person_y / frame_height))
                     send_dmx(ser, pan_value, tilt_value)
 
                     label = f"{class_name}: {confidence:.2f}"
