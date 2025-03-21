@@ -1,6 +1,7 @@
 import cv2
 import serial
 import time
+import torch
 
 from yolo.default import default_detection
 from dmx import send_dmx
@@ -15,6 +16,10 @@ def main():
 
     # Initialize YOLO model
     yolo = YOLO(model_name)
+
+    # Load model to gpu if available
+    if torch.backends.mps.is_available():
+        yolo.to(device="mps")
 
     # Open webcam
     cap = cv2.VideoCapture(0)
