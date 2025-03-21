@@ -84,14 +84,15 @@ def send_dmx(people, serial_connection):
             raise ValueError(f"Invalid color '{color}'. Must be one of {COLORS}.")
 
         pan, tilt = camera_to_dmx(x, y, light_number)  # Convert camera to DMX coordinates
-        dmx_data.append(f"{i}:{int(pan)},{int(tilt)},{color}")  # Append in 'index:pan,tilt,color' format
+        # dmx_data.append(f"{i}:{int(pan)},{int(tilt)},{color}")  # Append in 'index:pan,tilt,color' format
+        dmx_data.append(f"{i}:{pan},{tilt}")  # Append in 'index:pan,tilt,color' format
 
-    # Prepare string to send
-    dmx_string = ";".join(dmx_data)
+    # Prepare string to send with a semicolon at the end
+    dmx_string = ";".join(dmx_data) + ";\n"
 
     # Send DMX data over an already open serial connection
     try:
-        serial_connection.write(dmx_string.encode('utf-8'))  # Send encoded string
+        serial_connection.write(dmx_string.encode())  # Send encoded string
         print(f"Sent: {dmx_string}")  # Print confirmation
     except serial.SerialException as e:
         print(f"Error sending DMX data: {e}")

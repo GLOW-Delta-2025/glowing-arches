@@ -30,6 +30,8 @@ def main():
     # Open a persistent serial connection
     try:
         serial_connection = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+        time.sleep(2)
+        serial_connection.write("0:100,100;1:100,100; \n".encode())
         print("Serial connection established.")
     except serial.SerialException as e:
         print(f"Error establishing serial connection: {e}")
