@@ -6,6 +6,8 @@ CAMERA_X_MAX = 1280
 CAMERA_Y_MIN = 0
 CAMERA_Y_MAX = 720
 
+COLORS = ["RED", "BLUE", "GREEN"]  # Supported colors
+
 # --- DMX 1 Calibration ---
 DMX_CALIBRATION = {
     1: { # DMX Light 1
@@ -48,31 +50,38 @@ def camera_to_dmx(x, y, light_number):
 
     return pan, tilt
 
-def send_dmx(coordinates, serial_connection):
+def send_dmx(people, serial_connection):
     """
-    Sends DMX pan and tilt values to the Arduino serial in the format:
-    '0:pan,tilt;1:pan,tilt'
-    coordinates: List of (X, Y) tuples where the first tuple is for light 1,
-    the second is for light 2. Max 2 items.
+    Sends DMX pan, tilt, and color values to the Arduino serial in the format:
+        '0:pan,tilt,color;1:pan,tilt,color'
+    people: List of dictionaries containing `x`, `y` and `color` for each person.
+            Example: [{'x': 640, 'y': 360, 'color': 'RED'}, {'x': 300, 'y': 200, 'color': 'BLUE'}]
+            Max 2 items.
     serial_connection: An open Serial object to send data over.
     """
-    if len(coordinates) > 2:
+    if len(people) > 2:
         raise ValueError("Only up to 2 lights are supported.")
 
     num_lights = len(DMX_CALIBRATION)
+    # Create a default people list with (0, 0, "RED") for missing lights
+    default_people = [{"x": 0, "y": 0, "color": "RED"}] * num_lights
+    for i, person in enumerate(people):
+        default_people[i] = person  # Overwrite with given people data
 
-    # Create a default coordinates list with (0, 0) for missing lights
-    default_coordinates = [(0, 0)] * num_lights
-    for i, coord in enumerate(coordinates):
-        default_coordinates[i] = coord  # Overwrite with given coordinates
-
-    # Convert defaulted coordinates to DMX pan, tilt format
+    # Convert defaulted people to DMX pan, tilt, color format
     dmx_data = []
     for i in range(num_lights):
         light_number = i + 1  # Light index starts at 1
-        x, y = default_coordinates[i]
+        person = default_people[i]
+        x = person["x"]
+        y = person["y"]
+        color = person["color"]
+
+        if color not in COLORS:  # Validate color
+            raise ValueError(f"Invalid color '{color}'. Must be one of {COLORS}.")
+
         pan, tilt = camera_to_dmx(x, y, light_number)  # Convert camera to DMX coordinates
-        dmx_data.append(f"{i}:{int(pan)},{int(tilt)}")  # Append in 'index:pan,tilt' format
+        dmx_data.append(f"{i}:{int(pan)},{int(tilt)},{color}")  # Append in 'index:pan,tilt,color' format
 
     # Prepare string to send
     dmx_string = ";".join(dmx_data)

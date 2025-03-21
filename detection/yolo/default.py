@@ -1,7 +1,14 @@
+import random
 import cv2
 
 CONFIDENCE_THRESHOLD = 0.5
 
+# Define possible colors for detections
+COLORS = ["RED", "GREEN", "BLUE"]
+
+def assign_random_color():
+    """Assign a random color from the defined COLORS."""
+    return random.choice(COLORS)
 
 def default_detection(yolo_model, frame, classes=None):
     """
@@ -43,8 +50,19 @@ def default_detection(yolo_model, frame, classes=None):
                 bottom_center_x = (x1 + x2) // 2
                 bottom_center_y = y2
 
+                # Assign a random color to the detected object
+                color = assign_random_color()
+
                 # Append to DMX coordinates (only collect up to 2 lights)
                 if len(dmx_coordinates) < 2:
-                    dmx_coordinates.append((bottom_center_x, bottom_center_y))
+                    dmx_coordinates.append({
+                        "x": bottom_center_x,
+                        "y": bottom_center_y,
+                        "color": color
+                    })
+
+                # Display the color next to the bounding box
+                color_text_pos = (x1, y1 - 10)
+                cv2.putText(annotated_frame, color, color_text_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
     return annotated_frame, dmx_coordinates, results
