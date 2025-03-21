@@ -6,7 +6,7 @@ CAMERA_X_MAX = 1280
 CAMERA_Y_MIN = 0
 CAMERA_Y_MAX = 720
 
-COLORS = ["RED", "BLUE", "GREEN"]  # Supported colors
+COLORS = ["RED", "BLUE", "GREEN", "WHITE"]  # Supported colors
 
 # --- DMX 1 Calibration ---
 DMX_CALIBRATION = {
@@ -17,17 +17,12 @@ DMX_CALIBRATION = {
         "BOTTOM": 105
     },
     2: { # DMX Light 2
-        "LEFT": 60,
-        "RIGHT": 95,
+        "LEFT": 70,
+        "RIGHT": 105,
         "TOP": 0,
         "BOTTOM": 105
     }
 }
-
-def map_value(value, input_min, input_max, output_min, output_max):
-    """Maps a value from one range to another."""
-    return output_min + (value - input_min) * (output_max - output_min) / (input_max - input_min)
-
 
 def camera_to_dmx(x, y, light_number):
     """
@@ -40,13 +35,20 @@ def camera_to_dmx(x, y, light_number):
     # Get calibration values for the specified light
     if light_number not in DMX_CALIBRATION:
         raise ValueError(f"Light number {light_number} is not defined in DMX_CALIBRATION.")
-
     calibration = DMX_CALIBRATION[light_number]
 
-    # Map camera X to DMX pan range
-    pan = map_value(x, CAMERA_X_MIN, CAMERA_X_MAX, calibration["LEFT"], calibration["RIGHT"])
-    # Map camera Y to DMX tilt range
-    tilt = map_value(y, CAMERA_Y_MIN, CAMERA_Y_MAX, calibration["TOP"], calibration["BOTTOM"])
+    # Extract calibration values
+    dmx_left = calibration["LEFT"]
+    dmx_right = calibration["RIGHT"]
+    dmx_top = calibration["TOP"]
+    dmx_bottom = calibration["BOTTOM"]
+
+    # Map screen coordinates (x, y) to DMX pan and tilt values
+    pan_raw = int(dmx_right + (dmx_left - dmx_right) * (x / CAMERA_X_MAX))
+    tilt_raw = int(dmx_bottom + (dmx_top - dmx_bottom) * (y / CAMERA_Y_MAX))
+
+    pan = max(0, min(255, int(pan_raw)))
+    tilt = max(0, min(255, int(tilt_raw)))
 
     return pan, tilt
 
@@ -63,8 +65,8 @@ def send_dmx(people, serial_connection):
         raise ValueError("Only up to 2 lights are supported.")
 
     num_lights = len(DMX_CALIBRATION)
-    # Create a default people list with (0, 0, "RED") for missing lights
-    default_people = [{"x": 0, "y": 0, "color": "RED"}] * num_lights
+    # Create a default people list with (0, 0, "WHITE") for missing lights
+    default_people = [{"x": 0, "y": 0, "color": "WHITE"}] * num_lights
     for i, person in enumerate(people):
         default_people[i] = person  # Overwrite with given people data
 
@@ -73,6 +75,7 @@ def send_dmx(people, serial_connection):
     for i in range(num_lights):
         light_number = i + 1  # Light index starts at 1
         person = default_people[i]
+
         x = person["x"]
         y = person["y"]
         color = person["color"]
