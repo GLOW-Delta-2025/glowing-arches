@@ -6,9 +6,15 @@ CAMERA_X_MAX = 1280
 CAMERA_Y_MIN = 0
 CAMERA_Y_MAX = 720
 
-COLORS = ["RED", "BLUE", "GREEN", "WHITE"]  # Supported colors
+# Supported colors with their corresponding RGB codes
+COLOR_RGB = {
+    "RED": (255, 0, 0),
+    "BLUE": (0, 0, 255),
+    "GREEN": (0, 255, 0),
+    "WHITE": (255, 255, 255),
+}
 
-# --- DMX 1 Calibration ---
+# --- DMX Calibration ---
 DMX_CALIBRATION = {
     1: { # DMX Light 1
         "LEFT": 70,
@@ -80,12 +86,13 @@ def send_dmx(people, serial_connection):
         y = person["y"]
         color = person["color"]
 
-        if color not in COLORS:  # Validate color
-            raise ValueError(f"Invalid color '{color}'. Must be one of {COLORS}.")
+        if color not in COLOR_RGB:  # Validate color
+            raise ValueError(f"Invalid color '{color}'. Must be one of {list(COLOR_RGB.keys())}.")
 
         pan, tilt = camera_to_dmx(x, y, light_number)  # Convert camera to DMX coordinates
-        # dmx_data.append(f"{i}:{int(pan)},{int(tilt)},{color}")  # Append in 'index:pan,tilt,color' format
-        dmx_data.append(f"{i}:{pan},{tilt}")  # Append in 'index:pan,tilt,color' format
+        r, g, b = COLOR_RGB[color]  # Get RGB values for the color
+
+        dmx_data.append(f"{i}:{pan},{tilt},{r},{g},{b}")  # Append in 'index:pan,tilt,R,G,B' format
 
     # Prepare string to send with a semicolon at the end
     dmx_string = ";".join(dmx_data) + ";\n"
