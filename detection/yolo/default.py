@@ -7,8 +7,9 @@ CONFIDENCE_THRESHOLD = 0.5
 COLORS = ["RED", "GREEN", "BLUE"]
 
 def assign_random_color():
-    """Assign a random color from the defined COLORS."""
-    return random.choice(COLORS)
+    return "BLUE"
+    # """Assign a random color from the defined COLORS."""
+    # return random.choice(COLORS)
 
 def default_detection(yolo_model, frame, classes=None):
     """
