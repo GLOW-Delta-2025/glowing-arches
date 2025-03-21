@@ -89,7 +89,12 @@ def send_dmx(people, serial_connection):
         if color not in COLOR_RGB:  # Validate color
             raise ValueError(f"Invalid color '{color}'. Must be one of {list(COLOR_RGB.keys())}.")
 
-        pan, tilt = camera_to_dmx(x, y, light_number)  # Convert camera to DMX coordinates
+        if i == 0:
+            pan, tilt = camera_to_dmx(x, y, light_number)  # Convert camera to DMX coordinates for the first person
+        else:
+            pan = 100  # Hardcoded pan value for the rest
+            tilt = 50  # Hardcoded tilt value for the rest
+
         r, g, b = COLOR_RGB[color]  # Get RGB values for the color
 
         dmx_data.append(f"{i}:{pan},{tilt},{r},{g},{b}")  # Append in 'index:pan,tilt,R,G,B' format
