@@ -1,6 +1,8 @@
 import cv2
 import serial
 import time
+
+from yolo.default import default_detection
 from dmx import send_dmx
 from ultralytics import YOLO
 
@@ -49,34 +51,8 @@ def main():
             fps = 1 / (current_time - prev_time)  # FPS calculation
             prev_time = current_time
 
-            # Perform detection on the frame
-            results = yolo(frame, stream=False, classes=0, conf=CONFIDENCE_THRESHOLD)
-
-            # Clone the frame for annotations
-            annotated_frame = frame.copy()
-
-            # Coordinates list for sending to DMX (supports up to 2 lights)
-            dmx_coordinates = []
-
-            # Loop through each detection, draw boxes, and put labels
-            for r in results:
-                for box in r.boxes:
-                    # Get bounding box coordinates
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])  # Convert to integer values for OpenCV
-                    confidence = box.conf[0]  # Confidence score
-
-                    # Only process if confidence is above threshold
-                    if confidence > CONFIDENCE_THRESHOLD:
-                        # Draw rectangle around detected object
-                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-                        # Calculate bottom center (camera coordinates)
-                        bottom_center_x = (x1 + x2) // 2
-                        bottom_center_y = y2
-
-                        # Append to DMX coordinates (only collect up to 2 lights)
-                        if len(dmx_coordinates) < 2:
-                            dmx_coordinates.append((bottom_center_x, bottom_center_y))
+            # Perform detection using external logic
+            annotated_frame, dmx_coordinates, results = default_detection(yolo, frame, classes=0)
 
             # Send DMX data for calculated coordinates
             if dmx_coordinates:
