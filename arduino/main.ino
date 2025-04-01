@@ -25,6 +25,7 @@ void setup() {
     DmxMaster.write(base + 6, 0);   // No Green
     DmxMaster.write(base + 7, 0);   // No Blue
     DmxMaster.write(base + 8, 0);   // White color adjustment from dark to bright
+    DmxMaster.write(base + 9, 0);   // Adjust mixed color
     // Adjust mixed color
     // Adjust strobe from slow to fast
     // Close/open sound (0-127 = close and 128-255 = open)
@@ -56,6 +57,7 @@ void processSerialData(String data) {
       int greenValue = segment.substring(commaIndex + 3).toInt();
       int blueValue = segment.substring(commaIndex + 4).toInt();
       int whiteValue = segment.substring(commaIndex + 5).toInt();
+      int mixedColorValue = segment.substring(commaIndex + 6).toInt();
 
       if (id >= 0 && id < numSpotlights) {
         int base = spotlights[id];
@@ -65,6 +67,7 @@ void processSerialData(String data) {
         DmxMaster.write(base + 6, greenValue);
         DmxMaster.write(base + 7, blueValue);
         DmxMaster.write(base + 8, whiteValue);
+        DmxMaster.write(base + 9, mixedColorValue);
       }
     }
     start = sepIndex + 1;  // Move to next segment
