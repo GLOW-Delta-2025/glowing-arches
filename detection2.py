@@ -10,7 +10,7 @@ CAMERA_FOCAL_LENGTH_PIXELS = 1000  # Calibrate!
 KNOWN_OBJECT_HEIGHT = 1.75
 MAX_DISTANCE = 12
 MIN_DISTANCE = 0
-SERIAL_PORT = '/dev/tty.usbserial-2110'
+SERIAL_PORT = '/dev/ttyUSB0'
 BAUD_RATE = 9600
 
 # --- DMX Pan Calibration ---
@@ -32,20 +32,17 @@ def estimate_distance(bbox_height_pixels):
 def send_dmx(ser, pan, tilt):
     """Sends DMX pan and tilt values and reads the response."""
     try:
-        pan = max(0, min(255, int(pan)))
-        tilt = max(0, min(255, int(tilt)))
-        # Variables for spotlight settings
         spotlight_id = 0
-        pan = 0
-        tilt = 125
         red = 255
-        green = 0
+        green = 255
         blue = 0
-        white = 100
-        mixed = 20
+        white = 0
+        mixed = 0 # this is random and it explored everything. do not touch
+        dimming = 20 # 1 is no light 255 is full brightness
 
         # Build the DMX command string
-        command = f"{spotlight_id}:{pan},{tilt},{red},{green},{blue},{white},{mixed};\n"
+        command = f"{spotlight_id}:{pan},{tilt},{red},{green},{blue},{white},{mixed},{dimming};\n"
+        print(command)
 
         # Send to Arduino
         ser.write(command.encode())
@@ -54,6 +51,7 @@ def send_dmx(ser, pan, tilt):
         response = read_serial_response(ser)
         if response:
             print(f"Arduino: {response}")
+            
 
     except serial.SerialException as e:
         print(f"Serial communication error: {e}")
@@ -81,7 +79,7 @@ def read_serial_response(ser):
 
 def main():
     model = YOLO(MODEL_NAME)
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(4)
     if not cap.isOpened():
         print("Cannot open camera")
         return
@@ -123,7 +121,8 @@ def main():
                 h = y2 - y1
                 confidence = float(box.conf[0])
                 cls = int(box.cls[0])
-                class_name = model.names[cls] if model.names else f"Class {cls}"
+                class_name = model.names[cls]
+                # class_name = model.names[cls] if model.names else f"Class {cls}"
                 distance = estimate_distance(h)
 
                 if MIN_DISTANCE <= distance <= MAX_DISTANCE:
@@ -131,6 +130,7 @@ def main():
                     person_y = y1 + h // 2
                     pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (person_x / frame_width))
                     tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (person_y / frame_height))
+                    print("pan_value", pan_value)
                     send_dmx(ser, pan_value, tilt_value)
 
                     label = f"ID {box_idx} {class_name}: {confidence:.2f}"
