@@ -2,13 +2,14 @@ import cv2
 from ultralytics import YOLO
 import time
 import serial
+import math  # Import the math module for distance calculation
 
 # --- Configuration ---
 MODEL_NAME = "yolov8n.pt"
 CONFIDENCE_THRESHOLD = 0.5
 CAMERA_FOCAL_LENGTH_PIXELS = 1000  # Calibrate!
 KNOWN_OBJECT_HEIGHT = 1.75
-MAX_DISTANCE = 12
+MAX_DISTANCE = 5
 MIN_DISTANCE = 0
 SERIAL_PORT = '/dev/ttyUSB0'
 BAUD_RATE = 9600
@@ -18,7 +19,7 @@ DMX_LEFT = 70
 DMX_RIGHT = 105
 
 # --- DMX Tilt Calibration ---
-DMX_TOP = 0
+DMX_TOP = 10
 DMX_BOTTOM = 105
 
 SEND_INTERVAL = 100 #in ms
@@ -35,18 +36,22 @@ def estimate_distance(bbox_height_pixels):
 def send_dmx(ser, pan, tilt):
     # time.sleep(0.1)
     """Sends DMX pan and tilt values and reads the response."""
+    time.sleep(0.1)
     try:
+        pan = max(1,  min(255, int(pan)))
+        tilt = max(1, min(255, int(tilt)))
+
         spotlight_id = 0
+        red = 255
+        green = 0
         red = 0
         green = 255
         blue = 0
-        white = 0
-        mixed = 0 # this is random and it explored everything. do not touch
-        dimming = 20 # 1 is no light 255 is full brightness
+        white = 100
+        mixed = 20
 
         # Build the DMX command string
-        command = f"{spotlight_id}:{pan},{tilt},{red},{green},{blue},{white},{mixed},{dimming};\n"
-        print(command)
+        command = f"{spotlight_id}:{pan},{tilt},{red},{green},{blue},{white},{mixed};\n"
 
         # Send to Arduino
         ser.write(command.encode())
@@ -55,7 +60,6 @@ def send_dmx(ser, pan, tilt):
         response = read_serial_response(ser)
         if response:
             print(f"Arduino: {response}")
-            
 
     except serial.SerialException as e:
         print(f"Serial communication error: {e}")
@@ -86,6 +90,11 @@ def setMillisLastSent(millis):
     global millis_last_sent
     millis_last_sent = millis
 
+def calculate_distance(x1, y1, x2, y2):
+    """Calculates the Euclidean distance between two points."""
+    return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+
 def main():
     model = YOLO(MODEL_NAME)
     cap = cv2.VideoCapture(4)
@@ -105,6 +114,9 @@ def main():
         print(f"Failed to open serial port {SERIAL_PORT}: {e}")
         return
 
+    tracked_person_id = None
+    tracked_person_position = None
+
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -122,19 +134,54 @@ def main():
         annotated_frame = frame.copy()
 
         # --- Tracking Logic ---
-        for r in results:
-            boxes = r.boxes
-            for box_idx, box in enumerate(boxes):
-                x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0]]
-                w = x2 - x1
-                h = y2 - y1
-                confidence = float(box.conf[0])
-                cls = int(box.cls[0])
-                class_name = model.names[cls]
-                # class_name = model.names[cls] if model.names else f"Class {cls}"
-                distance = estimate_distance(h)
+        valid_boxes = []
+        valid_confidences = []
+        valid_classes = []
 
+        if results:
+            for i, box in enumerate(results[0].boxes.xyxy.tolist()):
+                x1, y1, x2, y2 = map(int, box)
+                h = y2 - y1
+                distance = estimate_distance(h)
                 if MIN_DISTANCE <= distance <= MAX_DISTANCE:
+                    valid_boxes.append(box)
+                    valid_confidences.append(results[0].boxes.conf[i].item())
+                    valid_classes.append(results[0].boxes.cls[i].item())
+
+        if valid_boxes:
+            if tracked_person_id is None:
+                # If no person is tracked yet, track the first one
+                tracked_person_id = 0
+                x1, y1, x2, y2 = map(int, valid_boxes[0])
+                tracked_person_position = (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)
+            else:
+                # Find the closest detected person to the tracked person's last position
+                min_distance = float('inf')
+                closest_person_index = -1
+                for i, box in enumerate(valid_boxes):
+                    x1, y1, x2, y2 = map(int, box)
+                    center = (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)
+                    distance = calculate_distance(tracked_person_position[0], tracked_person_position[1], center[0], center[1])
+                    if distance < min_distance:
+                        min_distance = distance
+                        closest_person_index = i
+
+                if closest_person_index != -1:
+                    # Update tracked person
+                    tracked_person_id = 0  # Keep it 0 for simplicity
+                    x1, y1, x2, y2 = map(int, valid_boxes[closest_person_index])
+                    tracked_person_position = (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)
+
+                    # Draw bounding box and send DMX
+                    w = x2 - x1
+                    h = y2 - y1
+                    confidence = valid_confidences[closest_person_index]
+                    class_name = model.names[int(valid_classes[closest_person_index])] if model.names else f"Class {int(valid_classes[closest_person_index])}"
+                    distance = estimate_distance(h)
+
+                    pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (tracked_person_position[0] / frame_width))
+                    tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (tracked_person_position[1] / frame_height))
+                    send_dmx(ser, pan_value, tilt_value)
                     person_x = x1 + w // 2
                     person_y = y1 + h // 2
                     pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (person_x / frame_width))
@@ -145,11 +192,17 @@ def main():
                         send_dmx(ser, pan_value, tilt_value)
                         setMillisLastSent(current_time)
 
-                    label = f"ID {box_idx} {class_name}: {confidence:.2f}"
+                    label = f"ID {tracked_person_id} {class_name}: {confidence:.2f}"
                     if distance != -1:
                         label += f" Dist: {distance:.2f}m"
                     cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.putText(annotated_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        elif tracked_person_position is not None:
+            # If the tracked person is lost, keep the last position for a while (optional)
+            # For simplicity, we'll just keep the last position
+            pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (tracked_person_position[0] / frame_width))
+            tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (tracked_person_position[1] / frame_height))
+            send_dmx(ser, pan_value, tilt_value)
 
         fps = 1 / inference_time if inference_time > 0 else 0
         cv2.putText(annotated_frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
