@@ -2,6 +2,7 @@ import cv2
 from ultralytics import YOLO
 import time
 import serial
+import math  # Import the math module for distance calculation
 
 # --- Configuration ---
 MODEL_NAME = "yolov8n.pt"
@@ -10,7 +11,7 @@ CAMERA_FOCAL_LENGTH_PIXELS = 1000  # Calibrate!
 KNOWN_OBJECT_HEIGHT = 1.75
 MAX_DISTANCE = 12
 MIN_DISTANCE = 0
-SERIAL_PORT = '/dev/tty.usbserial-2110'
+SERIAL_PORT = '/dev/tty.usbserial-1110'
 BAUD_RATE = 9600
 
 # --- DMX Pan Calibration ---
@@ -18,7 +19,7 @@ DMX_LEFT = 70
 DMX_RIGHT = 105
 
 # --- DMX Tilt Calibration ---
-DMX_TOP = 0
+DMX_TOP = 10
 DMX_BOTTOM = 105
 
 
@@ -31,17 +32,16 @@ def estimate_distance(bbox_height_pixels):
 
 def send_dmx(ser, pan, tilt):
     """Sends DMX pan and tilt values and reads the response."""
+    time.sleep(0.1)
     try:
-        pan = max(0, min(255, int(pan)))
-        tilt = max(0, min(255, int(tilt)))
-        # Variables for spotlight settings
+        pan = max(1,  min(255, int(pan)))
+        tilt = max(1, min(255, int(tilt)))
+
         spotlight_id = 0
-        pan = 0
-        tilt = 125
         red = 255
         green = 0
         blue = 0
-        white = 100
+        white = 0
         mixed = 20
 
         # Build the DMX command string
@@ -79,6 +79,11 @@ def read_serial_response(ser):
         return None
 
 
+def calculate_distance(x1, y1, x2, y2):
+    """Calculates the Euclidean distance between two points."""
+    return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+
 def main():
     model = YOLO(MODEL_NAME)
     cap = cv2.VideoCapture(0)
@@ -98,6 +103,9 @@ def main():
         print(f"Failed to open serial port {SERIAL_PORT}: {e}")
         return
 
+    tracked_person_id = None
+    tracked_person_position = None
+
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -115,29 +123,57 @@ def main():
         annotated_frame = frame.copy()
 
         # --- Tracking Logic ---
-        for r in results:
-            boxes = r.boxes
-            for box_idx, box in enumerate(boxes):
-                x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0]]
-                w = x2 - x1
-                h = y2 - y1
-                confidence = float(box.conf[0])
-                cls = int(box.cls[0])
-                class_name = model.names[cls] if model.names else f"Class {cls}"
-                distance = estimate_distance(h)
+        boxes = results[0].boxes.xyxy.tolist() if results else []
+        confidences = results[0].boxes.conf.tolist() if results else []
+        classes = results[0].boxes.cls.tolist() if results else []
 
-                if MIN_DISTANCE <= distance <= MAX_DISTANCE:
-                    person_x = x1 + w // 2
-                    person_y = y1 + h // 2
-                    pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (person_x / frame_width))
-                    tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (person_y / frame_height))
-                    send_dmx(ser, pan_value, tilt_value)
+        if boxes:
+            if tracked_person_id is None:
+                # If no person is tracked yet, track the first one
+                tracked_person_id = 0
+                x1, y1, x2, y2 = map(int, boxes[0])
+                tracked_person_position = (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)
+            else:
+                # Find the closest detected person to the tracked person's last position
+                min_distance = float('inf')
+                closest_person_index = -1
+                for i, box in enumerate(boxes):
+                    x1, y1, x2, y2 = map(int, box)
+                    center = (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)
+                    distance = calculate_distance(tracked_person_position[0], tracked_person_position[1], center[0], center[1])
+                    if distance < min_distance:
+                        min_distance = distance
+                        closest_person_index = i
 
-                    label = f"ID {box_idx} {class_name}: {confidence:.2f}"
+                if closest_person_index != -1:
+                    # Update tracked person
+                    tracked_person_id = 0  # Keep it 0 for simplicity
+                    x1, y1, x2, y2 = map(int, boxes[closest_person_index])
+                    tracked_person_position = (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)
+
+                    # Draw bounding box and send DMX
+                    w = x2 - x1
+                    h = y2 - y1
+                    confidence = confidences[closest_person_index]
+                    class_name = model.names[int(classes[closest_person_index])] if model.names else f"Class {int(classes[closest_person_index])}"
+                    distance = estimate_distance(h)
+
+                    if MIN_DISTANCE <= distance <= MAX_DISTANCE:
+                        pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (tracked_person_position[0] / frame_width))
+                        tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (tracked_person_position[1] / frame_height))
+                        send_dmx(ser, pan_value, tilt_value)
+
+                    label = f"ID {tracked_person_id} {class_name}: {confidence:.2f}"
                     if distance != -1:
                         label += f" Dist: {distance:.2f}m"
                     cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.putText(annotated_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        elif tracked_person_position is not None:
+            # If the tracked person is lost, keep the last position for a while (optional)
+            # For simplicity, we'll just keep the last position
+            pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (tracked_person_position[0] / frame_width))
+            tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (tracked_person_position[1] / frame_height))
+            send_dmx(ser, pan_value, tilt_value)
 
         fps = 1 / inference_time if inference_time > 0 else 0
         cv2.putText(annotated_frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
