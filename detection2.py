@@ -34,9 +34,13 @@ def estimate_distance(bbox_height_pixels):
     return distance
 
 def send_dmx(ser, pan, tilt):
-    # time.sleep(0.1)
+    current_time = time.time_ns()
+    if (current_time - millis_last_sent)/1000000 > SEND_INTERVAL:
+        setMillisLastSent(current_time)
+    else:
+        return
     """Sends DMX pan and tilt values and reads the response."""
-    time.sleep(0.1)
+    # time.sleep(0.1)
     try:
         pan = max(1,  min(255, int(pan)))
         tilt = max(1, min(255, int(tilt)))
