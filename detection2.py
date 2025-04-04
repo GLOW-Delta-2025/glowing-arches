@@ -41,7 +41,7 @@ def send_dmx(ser, pan, tilt):
         red = 255
         green = 0
         blue = 0
-        white = 0
+        white = 100
         mixed = 20
 
         # Build the DMX command string
@@ -123,21 +123,31 @@ def main():
         annotated_frame = frame.copy()
 
         # --- Tracking Logic ---
-        boxes = results[0].boxes.xyxy.tolist() if results else []
-        confidences = results[0].boxes.conf.tolist() if results else []
-        classes = results[0].boxes.cls.tolist() if results else []
+        valid_boxes = []
+        valid_confidences = []
+        valid_classes = []
 
-        if boxes:
+        if results:
+            for i, box in enumerate(results[0].boxes.xyxy.tolist()):
+                x1, y1, x2, y2 = map(int, box)
+                h = y2 - y1
+                distance = estimate_distance(h)
+                if MIN_DISTANCE <= distance <= MAX_DISTANCE:
+                    valid_boxes.append(box)
+                    valid_confidences.append(results[0].boxes.conf[i].item())
+                    valid_classes.append(results[0].boxes.cls[i].item())
+
+        if valid_boxes:
             if tracked_person_id is None:
                 # If no person is tracked yet, track the first one
                 tracked_person_id = 0
-                x1, y1, x2, y2 = map(int, boxes[0])
+                x1, y1, x2, y2 = map(int, valid_boxes[0])
                 tracked_person_position = (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)
             else:
                 # Find the closest detected person to the tracked person's last position
                 min_distance = float('inf')
                 closest_person_index = -1
-                for i, box in enumerate(boxes):
+                for i, box in enumerate(valid_boxes):
                     x1, y1, x2, y2 = map(int, box)
                     center = (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)
                     distance = calculate_distance(tracked_person_position[0], tracked_person_position[1], center[0], center[1])
@@ -148,20 +158,19 @@ def main():
                 if closest_person_index != -1:
                     # Update tracked person
                     tracked_person_id = 0  # Keep it 0 for simplicity
-                    x1, y1, x2, y2 = map(int, boxes[closest_person_index])
+                    x1, y1, x2, y2 = map(int, valid_boxes[closest_person_index])
                     tracked_person_position = (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)
 
                     # Draw bounding box and send DMX
                     w = x2 - x1
                     h = y2 - y1
-                    confidence = confidences[closest_person_index]
-                    class_name = model.names[int(classes[closest_person_index])] if model.names else f"Class {int(classes[closest_person_index])}"
+                    confidence = valid_confidences[closest_person_index]
+                    class_name = model.names[int(valid_classes[closest_person_index])] if model.names else f"Class {int(valid_classes[closest_person_index])}"
                     distance = estimate_distance(h)
 
-                    if MIN_DISTANCE <= distance <= MAX_DISTANCE:
-                        pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (tracked_person_position[0] / frame_width))
-                        tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (tracked_person_position[1] / frame_height))
-                        send_dmx(ser, pan_value, tilt_value)
+                    pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (tracked_person_position[0] / frame_width))
+                    tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (tracked_person_position[1] / frame_height))
+                    send_dmx(ser, pan_value, tilt_value)
 
                     label = f"ID {tracked_person_id} {class_name}: {confidence:.2f}"
                     if distance != -1:
