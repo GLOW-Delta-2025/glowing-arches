@@ -47,15 +47,14 @@ def send_dmx(ser, pan, tilt):
 
         spotlight_id = 0
         red = 255
-        green = 0
-        red = 0
         green = 255
         blue = 0
-        white = 100
-        mixed = 20
+        white = 0
+        mixed = 0 # this is random and it explored everything. do not touch
+        dimming = 20 # 1 is no light 255 is full brightness
 
         # Build the DMX command string
-        command = f"{spotlight_id}:{pan},{tilt},{red},{green},{blue},{white},{mixed};\n"
+        command = f"{spotlight_id}:{pan},{tilt},{red},{green},{blue},{white},{mixed},{dimming};\n"
 
         # Send to Arduino
         ser.write(command.encode())
