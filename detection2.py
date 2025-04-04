@@ -21,6 +21,9 @@ DMX_RIGHT = 105
 DMX_TOP = 0
 DMX_BOTTOM = 105
 
+SEND_INTERVAL = 100 #in ms
+millis_last_sent = time.time_ns()
+
 
 def estimate_distance(bbox_height_pixels):
     """Estimates distance based on bounding box height."""
@@ -30,10 +33,11 @@ def estimate_distance(bbox_height_pixels):
     return distance
 
 def send_dmx(ser, pan, tilt):
+    # time.sleep(0.1)
     """Sends DMX pan and tilt values and reads the response."""
     try:
         spotlight_id = 0
-        red = 255
+        red = 0
         green = 255
         blue = 0
         white = 0
@@ -75,7 +79,12 @@ def read_serial_response(ser):
     except UnicodeDecodeError as e:
         print(f"Unicode decode error: {e}")
         return None
-
+def getMillisLastSent():
+    global millis_last_sent
+    return millis_last_sent
+def setMillisLastSent(millis):
+    global millis_last_sent
+    millis_last_sent = millis
 
 def main():
     model = YOLO(MODEL_NAME)
@@ -131,7 +140,10 @@ def main():
                     pan_value = int(DMX_RIGHT + (DMX_LEFT - DMX_RIGHT) * (person_x / frame_width))
                     tilt_value = int(DMX_BOTTOM + (DMX_TOP - DMX_BOTTOM) * (person_y / frame_height))
                     print("pan_value", pan_value)
-                    send_dmx(ser, pan_value, tilt_value)
+                    current_time = time.time_ns()
+                    if (current_time - millis_last_sent)/1000000 > SEND_INTERVAL:
+                        send_dmx(ser, pan_value, tilt_value)
+                        setMillisLastSent(current_time)
 
                     label = f"ID {box_idx} {class_name}: {confidence:.2f}"
                     if distance != -1:
